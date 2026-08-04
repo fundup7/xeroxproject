@@ -241,10 +241,10 @@ async function startBot() {
 
         // Determine if file is LBA Fast-Track or requires Observation Window
         const isLbaFastTrack = /lba|test|question|exam|worksheet|assignment|model_paper/i.test(fileName);
-        const observationDelayMs = isLbaFastTrack ? 3000 : 45000;
+        const observationDelayMs = isLbaFastTrack ? 3000 : 300000; // 5 minutes (300,000 ms) for general PDFs
 
         if (!isLbaFastTrack) {
-          console.log(`⏳ [Observation Window] Waiting 45s to capture follow-up messages from "${docSender}" or group...`);
+          console.log(`⏳ [Observation Window] Waiting 5 minutes (300s) to capture follow-up messages from "${docSender}" or group...`);
         } else {
           console.log(`⚡ [LBA Fast-Track] "${fileName}" identified as test/LBA paper. Processing in 3s...`);
         }
@@ -268,21 +268,17 @@ async function startBot() {
 
             // Add 3-7 second human-like delay jitter before sending
             const delayMs = Math.floor(Math.random() * 4000) + 3000;
-            console.log(`⏳ Waiting ${(delayMs / 1000).toFixed(1)}s delay before forwarding to Print Shop (${printShopJid})...`);
+            console.log(`⏳ Waiting ${(delayMs / 1000).toFixed(1)}s delay before forwarding clean PDF to Print Shop (${printShopJid})...`);
             await new Promise((resolve) => setTimeout(resolve, delayMs));
 
-            // Forward PDF Buffer directly to Print Shop JID
-            const sendCaption = aiResult.recommendedCaption || `Please print 1 copy of ${fileName}. I will pick it up at 3:30 PM.`;
-
+            // Forward Clean PDF Buffer directly to Print Shop JID (without any text caption)
             await sock.sendMessage(printShopJid, {
               document: pdfBuffer,
               mimetype: 'application/pdf',
-              fileName: fileName,
-              caption: sendCaption
+              fileName: fileName
             });
 
-            console.log(`🚀 [SUCCESS] Forwarded "${fileName}" to Print Shop (${printShopJid})!`);
-            console.log(`   Caption Sent: "${sendCaption}"\n`);
+            console.log(`🚀 [SUCCESS] Clean PDF "${fileName}" forwarded to Print Shop (${printShopJid})!\n`);
           } catch (err) {
             console.error(`❌ [Error] Failed to process PDF "${fileName}":`, err.message);
           }
