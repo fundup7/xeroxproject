@@ -18,6 +18,7 @@ let sock = null;
 let connectionState = 'DISCONNECTED';
 let qrCodeValue = null;
 const processedMessageIds = new Set();
+const recentGroupMessagesMap = new Map();
 
 // Maximum memory protection limit for in-memory deduplication (500 items max)
 const MAX_DEDUPE_CACHE = 500;
@@ -193,6 +194,20 @@ async function startBot() {
           caption = docMsg?.caption || '';
         }
 
+        // Track surrounding text messages in group context for AI reasoning
+        const textContent = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
+        if (textContent) {
+          const senderName = msg.pushName || msg.key.participant?.split('@')[0] || 'Teacher/Member';
+          const msgTime = new Date((msg.messageTimestamp || Math.floor(Date.now() / 1000)) * 1000).toLocaleTimeString();
+
+          if (!recentGroupMessagesMap.has(remoteJid)) {
+            recentGroupMessagesMap.set(remoteJid, []);
+          }
+          const groupHistory = recentGroupMessagesMap.get(remoteJid);
+          groupHistory.push({ sender: senderName, text: textContent.trim(), time: msgTime });
+          if (groupHistory.length > 6) groupHistory.shift(); // Keep last 6 text messages
+        }
+
         // Proceed only if a PDF document is detected
         if (!docMsg || (docMsg.mimetype !== 'application/pdf' && !docMsg.fileName?.toLowerCase().endsWith('.pdf'))) {
           continue;
@@ -223,8 +238,9 @@ async function startBot() {
 
         console.log(`[Download] Downloaded "${fileName}" (${(pdfBuffer.length / 1024 / 1024).toFixed(2)} MB) to memory.`);
 
-        // Analyze document intent using Gemini AI
-        const aiResult = await analyzePDF(pdfBuffer, caption, fileName);
+        // Analyze document intent using Gemini AI with surrounding group conversation context
+        const recentContext = recentGroupMessagesMap.get(remoteJid) || [];
+        const aiResult = await analyzePDF(pdfBuffer, caption, fileName, recentContext);
 
         if (!aiResult.shouldPrint) {
           console.log(`⏩ [Skipped] "${fileName}" classified as non-printable: ${aiResult.reason}`);

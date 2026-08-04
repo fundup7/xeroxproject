@@ -38,14 +38,15 @@ const VERIFIED_MODELS = [
 ];
 
 /**
- * Analyzes the first two pages of a PDF buffer and optional caption using verified Gemini Flash models.
+ * Analyzes the first two pages of a PDF buffer, caption, and surrounding group conversation context.
  * 
  * @param {Buffer} pdfBuffer - Memory buffer of the full PDF file
- * @param {string} caption - WhatsApp caption sent alongside the message
+ * @param {string} caption - WhatsApp caption sent alongside the PDF message
  * @param {string} fileName - File name of the PDF document
+ * @param {Array<{sender: string, text: string, time: string}>} recentContext - Surrounding text messages from group
  * @returns {Promise<{ shouldPrint: boolean, reason: string, documentTitle: string, recommendedCaption: string }>}
  */
-async function analyzePDF(pdfBuffer, caption = '', fileName = 'document.pdf') {
+async function analyzePDF(pdfBuffer, caption = '', fileName = 'document.pdf', recentContext = []) {
   const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey || apiKey.includes('YourGeminiAPIKeyHere')) {
@@ -64,23 +65,36 @@ async function analyzePDF(pdfBuffer, caption = '', fileName = 'document.pdf') {
 
   const genAI = new GoogleGenerativeAI(apiKey);
 
+  // Format surrounding group chat context for Gemini
+  let formattedContext = 'None';
+  if (recentContext && recentContext.length > 0) {
+    formattedContext = recentContext.map(m => `[${m.time}] ${m.sender}: "${m.text}"`).join('\n');
+  }
+
   const prompt = `
 You are an intelligent document classification filter for a 2nd PUC student.
-Analyze the attached first 2 pages of this PDF document and the message caption sent with it.
+Analyze the attached first 2 pages of this PDF document, its caption, and the surrounding WhatsApp group text conversation.
+
+Surrounding Group Conversation (Messages sent before/around this PDF):
+${formattedContext}
+
+PDF Details:
+- File Name: "${fileName}"
+- Attached Caption: "${caption}"
+- Total Pages in Document: ${pageCount}
 
 Evaluation Rules:
 1. "shouldPrint": true ONLY IF the document is an actionable study paper (LBA test paper, question paper, worksheet, key answer, practice paper, or assignment sheet).
 2. "shouldPrint": false IF the document is a general circular, fee payment notice, event flyer, timetable, meeting agenda, syllabus copy, or textbook reference.
-3. Check the teacher's caption if available: "${caption}". If the teacher explicitly notes "Do not print" or "For online reading only", set "shouldPrint": false.
-4. File Name: "${fileName}"
-5. Total Pages in Document: ${pageCount}
+3. Check the surrounding group conversation and teacher notes. If messages say "Do not print", "Reference only", or "Fee circular", set "shouldPrint": false.
+4. If messages explicitly ask students to print or bring printout, set "shouldPrint": true.
 
 Return valid JSON strictly matching this schema:
 {
   "shouldPrint": true or false,
   "reason": "Clear 1-sentence reason for your decision",
   "documentTitle": "Name or Subject of the document",
-  "recommendedCaption": "A polite message for the xerox shop operator specifying the document name, requesting 1 copy for pick up at 3:30 PM"
+  "recommendedCaption": "A polite message for the xerox shop operator specifying document name and requesting 1 copy for pick up at 3:30 PM"
 }
 `;
 
