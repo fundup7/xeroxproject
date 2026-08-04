@@ -232,9 +232,6 @@ async function startBot() {
         }
 
         // Print Shop Target Validation
-        const rawPrintShopJid = process.env.PRINT_SHOP_JID;
-        const printShopJid = formatJID(rawPrintShopJid);
-
         if (!printShopJid) {
           console.error('[ERROR] PRINT_SHOP_JID is not configured in .env!');
           continue;
