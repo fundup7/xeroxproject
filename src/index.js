@@ -157,16 +157,23 @@ async function startBot() {
       if (m.type !== 'notify') return; // Ignore historical background syncs
 
       for (const msg of m.messages) {
-        // Skip messages sent by the bot itself
-        if (msg.key.fromMe) continue;
-
         const messageId = msg.key.id;
         const remoteJid = msg.key.remoteJid;
         const messageTimestamp = msg.messageTimestamp;
+        const printShopJid = formatJID(process.env.PRINT_SHOP_JID);
 
-        // Message Age Guard: Ignore messages older than 60 seconds
+        // Skip messages sent to/from the print shop directly to prevent loops
+        if (remoteJid === printShopJid) continue;
+
+        // Target Group Filter
+        const targetGroupJid = process.env.TARGET_GROUP_JID?.trim();
+        if (targetGroupJid && remoteJid !== targetGroupJid) {
+          continue;
+        }
+
+        // Message Age Guard: Ignore messages older than 120 seconds
         const currentUnix = Math.floor(Date.now() / 1000);
-        if (currentUnix - messageTimestamp > 60) continue;
+        if (currentUnix - messageTimestamp > 120) continue;
 
         // Deduplication Guard: Ignore already processed messages
         if (processedMessageIds.has(messageId)) continue;
@@ -192,13 +199,6 @@ async function startBot() {
         }
 
         const fileName = docMsg.fileName || 'document.pdf';
-        const targetGroupJid = process.env.TARGET_GROUP_JID?.trim();
-
-        // Target Group Filter
-        if (targetGroupJid && remoteJid !== targetGroupJid) {
-          console.log(`[Filter] Ignored PDF "${fileName}" from non-target group: ${remoteJid}`);
-          continue;
-        }
 
         // Mark as processed early to prevent double-execution
         processedMessageIds.add(messageId);
