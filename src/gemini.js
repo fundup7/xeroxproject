@@ -38,16 +38,18 @@ const VERIFIED_MODELS = [
 ];
 
 /**
- * Analyzes the first two pages of a PDF buffer, caption, and surrounding group conversation context.
+ * Analyzes PDF buffer, caption, uploader sender identity, and surrounding group text context.
  * 
  * @param {Buffer} pdfBuffer - Memory buffer of the full PDF file
  * @param {string} caption - WhatsApp caption sent alongside the PDF message
  * @param {string} fileName - File name of the PDF document
+ * @param {string} docSender - Name or identifier of the person who uploaded the PDF
  * @param {Array<{sender: string, text: string, time: string}>} recentContext - Surrounding text messages from group
  * @returns {Promise<{ shouldPrint: boolean, reason: string, documentTitle: string, recommendedCaption: string }>}
  */
-async function analyzePDF(pdfBuffer, caption = '', fileName = 'document.pdf', recentContext = []) {
+async function analyzePDF(pdfBuffer, caption = '', fileName = 'document.pdf', docSender = 'Teacher/Uploader', recentContext = []) {
   const apiKey = process.env.GEMINI_API_KEY;
+  const isLbaFileName = /lba|test|question|exam|worksheet|assignment|model_paper/i.test(fileName);
 
   if (!apiKey || apiKey.includes('YourGeminiAPIKeyHere')) {
     console.warn('[Gemini AI] ⚠️ GEMINI_API_KEY not set or default placeholder used. Operating in FALLBACK mode.');
@@ -65,36 +67,47 @@ async function analyzePDF(pdfBuffer, caption = '', fileName = 'document.pdf', re
 
   const genAI = new GoogleGenerativeAI(apiKey);
 
-  // Format surrounding group chat context for Gemini
-  let formattedContext = 'None';
+  // Format surrounding group chat context with clear sender separation
+  let formattedContext = 'No surrounding text messages recorded.';
   if (recentContext && recentContext.length > 0) {
-    formattedContext = recentContext.map(m => `[${m.time}] ${m.sender}: "${m.text}"`).join('\n');
+    formattedContext = recentContext.map(m => {
+      const isUploader = m.sender === docSender ? '⭐ (PDF Uploader)' : '';
+      return `[${m.time}] ${m.sender}${isUploader}: "${m.text}"`;
+    }).join('\n');
   }
 
   const prompt = `
-You are an intelligent document classification filter for a 2nd PUC student.
-Analyze the attached first 2 pages of this PDF document, its caption, and the surrounding WhatsApp group text conversation.
+You are an intelligent document classification filter for a 2nd PUC college student.
+Your primary objective is to make sure every important LBA / test / study paper gets printed, while filtering out non-essential circulars.
 
-Surrounding Group Conversation (Messages sent before/around this PDF):
+Document Metadata:
+- File Name: "${fileName}"
+- PDF Uploader: "${docSender}"
+- Attached Caption: "${caption}"
+- Total Pages: ${pageCount}
+
+Surrounding Group Text Conversation (Before & After PDF upload):
 ${formattedContext}
 
-PDF Details:
-- File Name: "${fileName}"
-- Attached Caption: "${caption}"
-- Total Pages in Document: ${pageCount}
+CRITICAL RULES FOR DECISION:
+1. 🚨 RULE #1 (HIGHEST PRIORITY - LBA PAPERS):
+   - If the file name or document content contains "LBA", "Learning Based Assessment", "Test Paper", "Question Paper", "Worksheet", "Model Paper", "Practice Paper", or "Assignment Sheet", set "shouldPrint": true ALWAYS.
+   - Never skip any LBA document under any circumstances!
 
-Evaluation Rules:
-1. "shouldPrint": true ONLY IF the document is an actionable study paper (LBA test paper, question paper, worksheet, key answer, practice paper, or assignment sheet).
-2. "shouldPrint": false IF the document is a general circular, fee payment notice, event flyer, timetable, meeting agenda, syllabus copy, or textbook reference.
-3. Check the surrounding group conversation and teacher notes. If messages say "Do not print", "Reference only", or "Fee circular", set "shouldPrint": false.
-4. If messages explicitly ask students to print or bring printout, set "shouldPrint": true.
+2. 👤 SENDER ATTRIBUTION RULE:
+   - Check messages sent specifically by the PDF Uploader ("${docSender}").
+   - If "${docSender}" or any teacher sends text saying "print this", "take a printout", "bring 1 copy to class", or "solve this paper", set "shouldPrint": true.
+   - If "${docSender}" explicitly sends text saying "do not print", "reference only", or "for online reading", set "shouldPrint": false.
+
+3. 📄 GENERAL CIRCULARS vs STUDY PAPERS:
+   - Fee payment notices, general college timetables, meeting announcements, bus routes, or flyers -> "shouldPrint": false (UNLESS the teacher explicitly asks to print it).
 
 Return valid JSON strictly matching this schema:
 {
   "shouldPrint": true or false,
-  "reason": "Clear 1-sentence reason for your decision",
-  "documentTitle": "Name or Subject of the document",
-  "recommendedCaption": "A polite message for the xerox shop operator specifying document name and requesting 1 copy for pick up at 3:30 PM"
+  "reason": "Clear 1-sentence reason referencing document type and sender context",
+  "documentTitle": "Subject or Name of the document",
+  "recommendedCaption": "A polite message for the xerox shop operator requesting 1 print copy for pick up at 3:30 PM"
 }
 `;
 
@@ -117,7 +130,14 @@ Return valid JSON strictly matching this schema:
       const responseText = result.response.text();
       const parsed = JSON.parse(responseText);
 
-      console.log(`[Gemini AI] Verified Model: "${modelName}" | Document: "${parsed.documentTitle}" | Print: ${parsed.shouldPrint} | Reason: ${parsed.reason}`);
+      // Force LBA safety override if filename or title indicates LBA paper
+      if (isLbaFileName && !parsed.shouldPrint) {
+        console.warn(`[Gemini AI] LBA Safety Override applied for "${fileName}". Forcing shouldPrint = true.`);
+        parsed.shouldPrint = true;
+        parsed.reason = `LBA Safety Guarantee: "${fileName}" is an essential test paper.`;
+      }
+
+      console.log(`[Gemini AI] Model: "${modelName}" | Uploader: "${docSender}" | Document: "${parsed.documentTitle}" | Print: ${parsed.shouldPrint} | Reason: ${parsed.reason}`);
       return parsed;
 
     } catch (error) {
@@ -129,7 +149,7 @@ Return valid JSON strictly matching this schema:
   console.error('[Gemini AI] All verified AI models failed or rate limited. Triggering safety fallback.');
   return {
     shouldPrint: true,
-    reason: 'AI classification model fallback',
+    reason: 'AI classification model fallback (LBA default print)',
     documentTitle: fileName,
     recommendedCaption: `Please print 1 copy of ${fileName}. I will pick it up at 3:30 PM. Thank you!`
   };

@@ -194,18 +194,19 @@ async function startBot() {
           caption = docMsg?.caption || '';
         }
 
+        const docSender = msg.pushName || msg.key.participant?.split('@')[0] || 'Teacher/Member';
+
         // Track surrounding text messages in group context for AI reasoning
         const textContent = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
         if (textContent) {
-          const senderName = msg.pushName || msg.key.participant?.split('@')[0] || 'Teacher/Member';
           const msgTime = new Date((msg.messageTimestamp || Math.floor(Date.now() / 1000)) * 1000).toLocaleTimeString();
 
           if (!recentGroupMessagesMap.has(remoteJid)) {
             recentGroupMessagesMap.set(remoteJid, []);
           }
           const groupHistory = recentGroupMessagesMap.get(remoteJid);
-          groupHistory.push({ sender: senderName, text: textContent.trim(), time: msgTime });
-          if (groupHistory.length > 6) groupHistory.shift(); // Keep last 6 text messages
+          groupHistory.push({ sender: docSender, text: textContent.trim(), time: msgTime });
+          if (groupHistory.length > 8) groupHistory.shift(); // Keep last 8 text messages
         }
 
         // Proceed only if a PDF document is detected
@@ -222,7 +223,7 @@ async function startBot() {
           processedMessageIds.delete(firstItem);
         }
 
-        console.log(`\n📄 [PDF Detected] Group: ${remoteJid} | File: "${fileName}"`);
+        console.log(`\n📄 [PDF Detected] Group: ${remoteJid} | Uploader: "${docSender}" | File: "${fileName}"`);
 
         // Download PDF safely into memory with size ceiling
         let pdfBuffer = Buffer.alloc(0);
@@ -238,38 +239,54 @@ async function startBot() {
 
         console.log(`[Download] Downloaded "${fileName}" (${(pdfBuffer.length / 1024 / 1024).toFixed(2)} MB) to memory.`);
 
-        // Analyze document intent using Gemini AI with surrounding group conversation context
-        const recentContext = recentGroupMessagesMap.get(remoteJid) || [];
-        const aiResult = await analyzePDF(pdfBuffer, caption, fileName, recentContext);
+        // Determine if file is LBA Fast-Track or requires Observation Window
+        const isLbaFastTrack = /lba|test|question|exam|worksheet|assignment|model_paper/i.test(fileName);
+        const observationDelayMs = isLbaFastTrack ? 3000 : 45000;
 
-        if (!aiResult.shouldPrint) {
-          console.log(`⏩ [Skipped] "${fileName}" classified as non-printable: ${aiResult.reason}`);
-          continue;
+        if (!isLbaFastTrack) {
+          console.log(`⏳ [Observation Window] Waiting 45s to capture follow-up messages from "${docSender}" or group...`);
+        } else {
+          console.log(`⚡ [LBA Fast-Track] "${fileName}" identified as test/LBA paper. Processing in 3s...`);
         }
 
-        // Print Shop Target Validation
-        if (!printShopJid) {
-          console.error('[ERROR] PRINT_SHOP_JID is not configured in .env!');
-          continue;
-        }
+        // Execute analysis after observation delay window
+        setTimeout(async () => {
+          try {
+            const recentContext = recentGroupMessagesMap.get(remoteJid) || [];
+            const aiResult = await analyzePDF(pdfBuffer, caption, fileName, docSender, recentContext);
 
-        // Add 3-7 second human-like delay jitter before sending
-        const delayMs = Math.floor(Math.random() * 4000) + 3000;
-        console.log(`⏳ Waiting ${(delayMs / 1000).toFixed(1)}s delay before forwarding to Print Shop (${printShopJid})...`);
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
+            if (!aiResult.shouldPrint) {
+              console.log(`⏩ [Skipped] "${fileName}" classified as non-printable: ${aiResult.reason}`);
+              return;
+            }
 
-        // Forward PDF Buffer directly to Print Shop JID
-        const sendCaption = aiResult.recommendedCaption || `Please print 1 copy of ${fileName}. I will pick it up at 3:30 PM.`;
+            // Print Shop Target Validation
+            if (!printShopJid) {
+              console.error('[ERROR] PRINT_SHOP_JID is not configured in .env!');
+              return;
+            }
 
-        await sock.sendMessage(printShopJid, {
-          document: pdfBuffer,
-          mimetype: 'application/pdf',
-          fileName: fileName,
-          caption: sendCaption
-        });
+            // Add 3-7 second human-like delay jitter before sending
+            const delayMs = Math.floor(Math.random() * 4000) + 3000;
+            console.log(`⏳ Waiting ${(delayMs / 1000).toFixed(1)}s delay before forwarding to Print Shop (${printShopJid})...`);
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
 
-        console.log(`🚀 [SUCCESS] Forwarded "${fileName}" to Print Shop (${printShopJid})!`);
-        console.log(`   Caption Sent: "${sendCaption}"\n`);
+            // Forward PDF Buffer directly to Print Shop JID
+            const sendCaption = aiResult.recommendedCaption || `Please print 1 copy of ${fileName}. I will pick it up at 3:30 PM.`;
+
+            await sock.sendMessage(printShopJid, {
+              document: pdfBuffer,
+              mimetype: 'application/pdf',
+              fileName: fileName,
+              caption: sendCaption
+            });
+
+            console.log(`🚀 [SUCCESS] Forwarded "${fileName}" to Print Shop (${printShopJid})!`);
+            console.log(`   Caption Sent: "${sendCaption}"\n`);
+          } catch (err) {
+            console.error(`❌ [Error] Failed to process PDF "${fileName}":`, err.message);
+          }
+        }, observationDelayMs);
       }
     } catch (err) {
       console.error('[Message Processing Error]:', err.message);
