@@ -1,0 +1,29 @@
+{
+  "name": "whatsapp-pdf-relay",
+  "version": "1.0.0",
+  "description": "Headless WhatsApp PDF Relay Bot using Baileys, MongoDB, Gemini AI, and Express",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node --max-old-space-size=400 src/index.js",
+    "dev": "node src/index.js"
+  },
+  "keywords": [
+    "whatsapp",
+    "baileys",
+    "bot",
+    "pdf-relay",
+    "gemini-ai",
+    "render"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "@whiskeysockets/baileys": "^6.7.9",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "hashery": "^0.1.3",
+    "mongoose": "^8.5.1",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
